@@ -1,6 +1,4 @@
 # Operations-and-Decision-Science-Research-and-Projects
-Operations and Decision Science Research and Projects
-# Operations and Decision Science Research and Projects
 
 This repository contains research notes, reproducible analyses, and portfolio-ready projects focused on Operations Research (OR) and Applied Decision Science. Work products emphasize clear problem framing, measurable objectives, transparent assumptions, and end-to-end reproducibility.
 
