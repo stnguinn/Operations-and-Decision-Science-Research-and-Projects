@@ -1,0 +1,462 @@
+---
+title: "Hotel Review Classification in R"
+author: Stanley Guinn
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+This notebook shows how to complete the hotel review classification exercise in **R** using **Posit Cloud**.
+
+The uploaded Excel workbook contains two sheets:
+
+- `Hotel Reviews Train`
+- `Hotel Reviews Test`
+
+Each sheet includes:
+
+- `Review` = review text
+- `Rating` = numeric rating
+- `Positive` = target variable (`1` = positive, `0` = not positive)
+
+This workflow:
+
+1. Reads the Excel data
+2. Prepares the text and target variable
+3. Builds a text-classification model
+4. Evaluates the model on the test set
+5. Saves predictions to a CSV file
+
+# Step 1: Install packages
+
+Run this chunk once if the packages are not already installed in Posit Cloud.
+
+```{r install-packages, eval=FALSE}
+install.packages(
+  c(
+    "readxl",
+    "tidyverse",
+    "tidymodels",
+    "textrecipes",
+    "stopwords"
+  )
+)
+```
+
+# Step 2: Load libraries
+
+```{r load-libraries, message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+library(stopwords)
+```
+
+# Step 3: Read the Excel workbook
+
+Make sure `HotelReviews.xlsx` is uploaded into your Posit Cloud project files.
+
+```{r read-data}
+train_data <- read_excel(
+  "HotelReviews.xlsx",
+  sheet = "Hotel Reviews Train"
+) |>
+  as.data.frame()
+
+test_data <- read_excel(
+  "HotelReviews.xlsx",
+  sheet = "Hotel Reviews Test"
+) |>
+  as.data.frame()
+```
+
+# Step 4: Inspect the data
+
+```{r inspect-data}
+dim(train_data) |>
+  as.data.frame()
+
+dim(test_data) |>
+  as.data.frame()
+
+head(train_data) |>
+  as.data.frame()
+
+str(train_data)
+```
+
+# Step 5: Convert the target into a factor
+
+This is required for classification.
+
+```{r target-prep}
+train_data <- train_data |>
+  mutate(
+    Positive = factor(
+      Positive,
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    )
+  ) |>
+  as.data.frame()
+
+test_data <- test_data |>
+  mutate(
+    Positive = factor(
+      Positive,
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    )
+  ) |>
+  as.data.frame()
+```
+
+# Step 6: Check class balance
+
+```{r class-balance}
+train_data |>
+  count(Positive) |>
+  as.data.frame()
+
+test_data |>
+  count(Positive) |>
+  as.data.frame()
+```
+
+# Step 7: Create the text recipe
+
+This recipe:
+
+- tokenizes the review text
+- removes stop words
+- keeps the top tokens
+- converts tokens to TF-IDF features
+- includes `Rating` as a predictor
+
+```{r recipe}
+review_recipe <- recipe(
+  Positive ~ Review + Rating,
+  data = train_data
+) |>
+  step_tokenize(Review) |>
+  step_stopwords(
+    Review,
+    stopword_source = "snowball"
+  ) |>
+  step_tokenfilter(
+    Review,
+    max_tokens = 1000
+  ) |>
+  step_tfidf(Review)
+```
+
+# Step 8: Define the model
+
+A good first model for this problem is logistic regression.
+
+```{r model}
+log_model <- logistic_reg() |>
+  set_engine("glm")
+```
+
+# Step 9: Create the workflow
+
+```{r workflow}
+review_workflow <- workflow() |>
+  add_recipe(review_recipe) |>
+  add_model(log_model)
+```
+
+# Step 10: Fit the model
+
+```{r fit-model}
+review_fit <- review_workflow |>
+  fit(data = train_data)
+```
+
+# Step 11: Make class predictions
+
+```{r class-predictions}
+test_predictions <- predict(
+  review_fit,
+  new_data = test_data,
+  type = "class"
+) |>
+  bind_cols(test_data) |>
+  as.data.frame()
+
+head(test_predictions) |>
+  as.data.frame()
+```
+
+# Step 12: Make probability predictions
+
+```{r prob-predictions}
+test_probabilities <- predict(
+  review_fit,
+  new_data = test_data,
+  type = "prob"
+) |>
+  bind_cols(test_data) |>
+  as.data.frame()
+
+head(test_probabilities) |>
+  as.data.frame()
+```
+
+# Step 13: Evaluate accuracy
+
+```{r accuracy}
+accuracy(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+) |>
+  as.data.frame()
+```
+
+# Step 14: Additional metrics
+
+```{r additional-metrics}
+metric_set(
+  accuracy,
+  precision,
+  recall,
+  f_meas
+)(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+) |>
+  as.data.frame()
+```
+
+# Step 15: ROC AUC
+
+```{r roc-auc}
+roc_auc(
+  data = test_probabilities,
+  truth = Positive,
+  .pred_Yes
+) |>
+  as.data.frame()
+```
+
+# Step 16: Confusion matrix
+
+```{r confusion-matrix}
+conf_mat(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+)
+```
+
+Tidy version:
+
+```{r confusion-matrix-tidy}
+conf_mat(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+) |>
+  tidy() |>
+  as.data.frame()
+```
+
+# Step 17: Plot the ROC curve
+
+```{r roc-curve}
+roc_curve(
+  data = test_probabilities,
+  truth = Positive,
+  .pred_Yes
+) |>
+  autoplot()
+```
+
+# Step 18: Inspect the engineered predictors
+
+```{r inspect-features}
+prepared_recipe <- review_recipe |>
+  prep()
+
+baked_train <- prepared_recipe |>
+  bake(new_data = NULL) |>
+  as.data.frame()
+
+dim(baked_train) |>
+  as.data.frame()
+
+head(baked_train[, 1:20]) |>
+  as.data.frame()
+```
+
+# Step 19: Predict new reviews you type yourself
+
+```{r new-reviews}
+new_reviews <- data.frame(
+  Review = c(
+    "excellent location clean room friendly staff and great breakfast",
+    "dirty room noisy hotel rude staff and terrible service"
+  ),
+  Rating = c(5, 1)
+)
+
+predict(
+  review_fit,
+  new_data = new_reviews,
+  type = "class"
+) |>
+  bind_cols(
+    predict(
+      review_fit,
+      new_data = new_reviews,
+      type = "prob"
+    )
+  ) |>
+  bind_cols(new_reviews) |>
+  as.data.frame()
+```
+
+# Step 20: Save predictions to CSV
+
+```{r save-predictions}
+write.csv(
+  test_predictions,
+  "hotel_review_predictions.csv",
+  row.names = FALSE
+)
+```
+
+# Interpretation
+
+You may describe the exercise like this:
+
+> The model was built in R using a text-classification workflow. The review text was tokenized, stop words were removed, and TF-IDF features were generated from the remaining words. A logistic regression classifier was then trained using both the processed review text and the numeric hotel rating. Model performance was evaluated on the test dataset using accuracy, precision, recall, F1 score, ROC AUC, and a confusion matrix.
+
+# Full script only version
+
+```{r full-script, eval=FALSE}
+library(readxl)
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+library(stopwords)
+
+train_data <- read_excel(
+  "HotelReviews.xlsx",
+  sheet = "Hotel Reviews Train"
+) |>
+  as.data.frame()
+
+test_data <- read_excel(
+  "HotelReviews.xlsx",
+  sheet = "Hotel Reviews Test"
+) |>
+  as.data.frame()
+
+train_data <- train_data |>
+  mutate(
+    Positive = factor(
+      Positive,
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    )
+  ) |>
+  as.data.frame()
+
+test_data <- test_data |>
+  mutate(
+    Positive = factor(
+      Positive,
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    )
+  ) |>
+  as.data.frame()
+
+review_recipe <- recipe(
+  Positive ~ Review + Rating,
+  data = train_data
+) |>
+  step_tokenize(Review) |>
+  step_stopwords(
+    Review,
+    stopword_source = "snowball"
+  ) |>
+  step_tokenfilter(
+    Review,
+    max_tokens = 1000
+  ) |>
+  step_tfidf(Review)
+
+log_model <- logistic_reg() |>
+  set_engine("glm")
+
+review_workflow <- workflow() |>
+  add_recipe(review_recipe) |>
+  add_model(log_model)
+
+review_fit <- review_workflow |>
+  fit(data = train_data)
+
+test_predictions <- predict(
+  review_fit,
+  new_data = test_data,
+  type = "class"
+) |>
+  bind_cols(test_data) |>
+  as.data.frame()
+
+test_probabilities <- predict(
+  review_fit,
+  new_data = test_data,
+  type = "prob"
+) |>
+  bind_cols(test_data) |>
+  as.data.frame()
+
+accuracy(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+) |>
+  as.data.frame()
+
+metric_set(
+  accuracy,
+  precision,
+  recall,
+  f_meas
+)(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+) |>
+  as.data.frame()
+
+roc_auc(
+  data = test_probabilities,
+  truth = Positive,
+  .pred_Yes
+) |>
+  as.data.frame()
+
+conf_mat(
+  data = test_predictions,
+  truth = Positive,
+  estimate = .pred_class
+)
+
+write.csv(
+  test_predictions,
+  "hotel_review_predictions.csv",
+  row.names = FALSE
+)
+```
